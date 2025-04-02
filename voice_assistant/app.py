@@ -99,7 +99,10 @@ Available actions:
 2. read_back_reminders: Read back active reminders
    {{
        "action": "read_back_reminders",
-       "message": "Here are your active reminders: [list of reminders]"
+       "message": "Here are your active reminders: [list of reminders]",
+       "data": {{
+           "response": "Your formatted list of reminders"  # REQUIRED: Must be a string containing the formatted list
+       }}
    }}
 
 3. clear_reminders: Clear all active reminders
@@ -131,16 +134,16 @@ Available actions:
        "action": "query_memory",
        "message": "Based on my records, [answer]",
        "data": {{
-           "response": "detailed answer"
+           "response": "Your answer based on available context"  # REQUIRED
        }}
    }}
 
 7. general_query: Handle general questions or statements
    {{
        "action": "general_query",
-       "message": "your response message",
+       "message": "Your brief, relevant response",
        "data": {{
-           "response": "detailed response"
+           "response": "Your detailed response"  # REQUIRED
        }}
    }}
 
@@ -404,12 +407,13 @@ def listen_and_process():
             is_listening = False
 
 def process_with_llm(text):
+    # Always use actual current time, not the time from context
     current_time = datetime.datetime.now()
     current_time_str = current_time.strftime("%Y-%m-%d %H:%M:%S")
     
     # Create context from both long-term and contextual memory
     context = {
-        "current_time": current_time_str,
+        "current_time": current_time_str,  # Use actual current time
         "long_term": {
             "reminders": memory["long_term"]["reminders"],
             "facts": memory["long_term"]["facts"][-5:],
@@ -431,6 +435,8 @@ def process_with_llm(text):
 
 User message: "{text}"
 
+IMPORTANT: The current time is {current_time_str}. Use this exact time for all time-based calculations.
+
 Provide a response in this JSON format:
 
 If it's a reminder or event:
@@ -439,10 +445,10 @@ If it's a reminder or event:
     "message": "I'll set a reminder for [message] at [time]",
     "data": {{
         "message": "The complete reminder message",
-        "suggested_time": "YYYY-MM-DD HH:MM:SS format",
-        "type": "reminder" or "event",
-        "needs_confirmation": true/false,
-        "confirmation_message": "Message to ask for confirmation if needed"
+        "suggested_time": "YYYY-MM-DD HH:MM:SS format",  # REQUIRED: Must be a valid future datetime
+        "type": "reminder" or "event",  # REQUIRED: Must be one of these two values
+        "needs_confirmation": true/false,  # REQUIRED: Must be a boolean
+        "confirmation_message": "Message to ask for confirmation if needed"  # Optional
     }}
 }}
 
@@ -451,8 +457,8 @@ If it's a fact to remember:
     "action": "remember_fact",
     "message": "I'll remember that [fact]",
     "data": {{
-        "content": "The fact to remember",
-        "category": "personal", "preference", "habit", etc.
+        "content": "The fact to remember",  # REQUIRED
+        "category": "personal", "preference", "habit", etc.  # REQUIRED
     }}
 }}
 
@@ -460,14 +466,17 @@ If it's clearing reminders:
 {{
     "action": "clear_reminders",
     "message": "I'll clear all your active reminders",
-    "needs_confirmation": true,
-    "confirmation_message": "I found X active reminders. Would you like me to clear them all?"
+    "needs_confirmation": true,  # REQUIRED
+    "confirmation_message": "I found X active reminders. Would you like me to clear them all?"  # REQUIRED
 }}
 
 If it's reading back reminders:
 {{
     "action": "read_back_reminders",
-    "message": "Here are your active reminders: [list of reminders]"
+    "message": "Here are your active reminders: [list of reminders]",
+    "data": {{
+        "response": "Your formatted list of reminders"  # REQUIRED: Must be a string containing the formatted list
+    }}
 }}
 
 If it's a question about past events or facts:
@@ -475,7 +484,7 @@ If it's a question about past events or facts:
     "action": "query_memory",
     "message": "Based on my records, [answer]",
     "data": {{
-        "response": "Your answer based on available context"
+        "response": "Your answer based on available context"  # REQUIRED
     }}
 }}
 
@@ -484,16 +493,25 @@ If it's a general query:
     "action": "general_query",
     "message": "Your brief, relevant response",
     "data": {{
-        "response": "Your detailed response"
+        "response": "Your detailed response"  # REQUIRED
     }}
 }}
 
 Important:
-1. For reminders, always include both the top-level "message" and the "message" field in the "data" object
-2. The top-level "message" should be a natural confirmation of what you're doing
-3. The "data.message" should contain the actual reminder text
+1. For reminders, you MUST include ALL required fields in the data object:
+   - message: The complete reminder text
+   - suggested_time: A valid future datetime in YYYY-MM-DD HH:MM:SS format
+   - type: Either "reminder" or "event"
+   - needs_confirmation: A boolean value
+2. For read_back_reminders, you MUST include:
+   - message: A natural confirmation message
+   - data.response: A formatted string containing the list of reminders
+3. The top-level "message" should be a natural confirmation of what you're doing
 4. Always include all required fields in the correct structure
-5. Return only the JSON object, nothing else."""
+5. Return only the JSON object, nothing else
+6. Use the exact current time provided above for all time-based calculations
+7. For relative times (e.g., "in 1 minute"), calculate the exact datetime based on the current time
+8. Do not include any extra fields or nested structures that aren't specified in the format."""
     
     try:
         completion = together_client.chat.completions.create(
@@ -830,12 +848,14 @@ def handle_action(action_data, original_text):
                 print(f"Invalid reminder data: {action_data}")
                 return
                 
+            # Convert string boolean to actual boolean
+            needs_confirmation = str(reminder_data.get("needs_confirmation", "false")).lower() == "true"
+                
             # Ask for confirmation if the time is ambiguous
             reminder_time = datetime.datetime.strptime(reminder_data["suggested_time"], "%Y-%m-%d %H:%M:%S")
             if reminder_time < datetime.datetime.now():
                 response = f"I notice this time has already passed. Would you like me to set this for tomorrow instead?"
                 print(f"Response: {response}")
-                speak(response)
                 pending_action = {
                     "action": "set_reminder",
                     "data": reminder_data,
@@ -843,7 +863,7 @@ def handle_action(action_data, original_text):
                 }
                 return
                 
-            if reminder_data.get("needs_confirmation", False):
+            if needs_confirmation:
                 pending_action = {
                     "action": "set_reminder",
                     "data": reminder_data,
@@ -1040,7 +1060,9 @@ def display_weekly_calendar():
         for reminder in memory["long_term"]["reminders"]:
             if reminder.get("status") == "active":
                 reminder_time = datetime.datetime.strptime(reminder["datetime"], "%Y-%m-%d %H:%M:%S")
-                if start_of_week <= reminder_time <= end_of_week:
+                # Include reminders that are within the week, regardless of year
+                if (start_of_week.month == reminder_time.month and 
+                    start_of_week.day <= reminder_time.day <= end_of_week.day):
                     weekly_items.append({
                         "time": reminder_time,
                         "text": f"Reminder: {reminder['message']}",
