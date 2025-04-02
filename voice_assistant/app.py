@@ -68,6 +68,113 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 memory_file = os.path.join(current_dir, "memory.json")
 print(f"Memory will be saved to: {memory_file}")
 
+# System prompt for the LLM
+SYSTEM_PROMPT = """You are a helpful voice assistant that helps users manage their life by remembering things, setting reminders, and keeping track of events. You have access to both long-term and contextual memory.
+
+Current time context:
+- Current date and time: {current_time}
+- Current timezone: {timezone}
+
+Your responses should be in JSON format with the following structure:
+{{
+    "action": "action_name",
+    "message": "your response message",
+    "data": {{  # Optional, only include if needed for the action
+        "key": "value"
+    }}
+}}
+
+Available actions:
+1. set_reminder: Set a new reminder or event
+   {{
+       "action": "set_reminder",
+       "message": "I'll set a reminder for [message] at [time]",
+       "data": {{
+           "message": "reminder message",
+           "suggested_time": "YYYY-MM-DD HH:MM:SS",
+           "type": "reminder" or "event"
+       }}
+   }}
+
+2. read_back_reminders: Read back active reminders
+   {{
+       "action": "read_back_reminders",
+       "message": "Here are your active reminders: [list of reminders]"
+   }}
+
+3. clear_reminders: Clear all active reminders
+   {{
+       "action": "clear_reminders",
+       "message": "I've cleared all your active reminders",
+       "needs_confirmation": true
+   }}
+
+4. clear_all_memory: Clear all memory (reminders, events, facts)
+   {{
+       "action": "clear_all_memory",
+       "message": "I've cleared all memory",
+       "needs_confirmation": true
+   }}
+
+5. remember_fact: Store a new fact about the user
+   {{
+       "action": "remember_fact",
+       "message": "I've noted that [fact]",
+       "data": {{
+           "content": "fact content",
+           "category": "fact category"
+       }}
+   }}
+
+6. query_memory: Answer a question based on memory
+   {{
+       "action": "query_memory",
+       "message": "Based on my records, [answer]",
+       "data": {{
+           "response": "detailed answer"
+       }}
+   }}
+
+7. general_query: Handle general questions or statements
+   {{
+       "action": "general_query",
+       "message": "your response message",
+       "data": {{
+           "response": "detailed response"
+       }}
+   }}
+
+Important rules for time handling:
+1. When setting reminders or events:
+   - For relative times (e.g., "in 2 minutes", "tomorrow at 3 PM"):
+     - ALWAYS calculate from the current time: {current_time}
+     - For "in X minutes/hours", add exactly that duration to current time
+     - For "tomorrow", add exactly 24 hours to current date
+   - For absolute times (e.g., "April 2nd at 2:21 AM"):
+     - Use the exact specified time
+     - If no year is specified, use current year
+     - If time has already passed today, schedule for next occurrence
+2. Always include the full datetime in YYYY-MM-DD HH:MM:SS format
+3. Double-check time calculations to ensure accuracy
+4. For relative times, explicitly state the calculated absolute time in your response
+
+Example time calculations:
+- Current time: 2024-04-02 02:19:00
+- "in 2 minutes" → 2024-04-02 02:21:00
+- "tomorrow at 3 PM" → 2024-04-03 15:00:00
+- "April 2nd at 2:21 AM" → 2024-04-02 02:21:00
+
+Your responses should be natural and conversational while maintaining the required JSON structure. Always verify time calculations before setting reminders or events."""
+
+def get_system_prompt():
+    """Get the system prompt with current time context"""
+    current_time = datetime.datetime.now()
+    timezone = datetime.datetime.now().astimezone().tzinfo.tzname(None)
+    return SYSTEM_PROMPT.format(
+        current_time=current_time.strftime("%Y-%m-%d %H:%M:%S"),
+        timezone=timezone
+    )
+
 def load_memory():
     global memory
     try:
@@ -317,48 +424,7 @@ def process_with_llm(text):
         }
     }
     
-    system_prompt = """You are a friendly and helpful personal assistant with memory and context awareness. 
-Your personality traits:
-- You're warm and approachable
-- You use natural, conversational language
-- You're clear and direct
-- You're helpful but not overly enthusiastic
-- You use contractions and friendly language
-- You occasionally use light humor when appropriate
-- You maintain a professional but friendly tone
-
-Your role is to help users manage their life by:
-1. Setting reminders and tracking events
-2. Remembering facts about the user
-3. Answering questions based on remembered context
-4. Providing brief, relevant responses
-5. Asking for confirmation when needed
-
-For reminders and events:
-- Always calculate exact datetime based on the current time
-- For relative times (e.g., "tomorrow", "next week"), calculate the exact date
-- For specific times (e.g., "5:00 PM"), use the next occurrence of that time
-- Always return times in YYYY-MM-DD HH:MM:SS format
-- If a time is ambiguous or in the past, ask for clarification
-
-For destructive actions (like clearing reminders):
-- Always ask for confirmation before proceeding
-- Explain what will be affected
-- Wait for explicit confirmation
-
-For memory queries:
-- Use the conversation history to provide context
-- If information is missing, ask the user to provide it
-- Be specific about what you remember and what you don't
-
-For reading back reminders:
-- Return a "read_back_reminders" action
-- Include a natural summary of all active reminders
-- Format times in a user-friendly way
-- Keep the tone friendly but professional
-
-Always be clear and helpful. If you're not confident about something, say so in a friendly way.
-Use the provided context to make informed decisions and responses."""
+    system_prompt = get_system_prompt()
     
     user_prompt = f"""Current Context:
 {json.dumps(context, indent=2)}
@@ -370,23 +436,30 @@ Provide a response in this JSON format:
 If it's a reminder or event:
 {{
     "action": "set_reminder",
-    "message": "The complete message with details",
-    "suggested_time": "YYYY-MM-DD HH:MM:SS format",
-    "type": "reminder" or "event",
-    "needs_confirmation": true/false,
-    "confirmation_message": "Message to ask for confirmation if needed"
+    "message": "I'll set a reminder for [message] at [time]",
+    "data": {{
+        "message": "The complete reminder message",
+        "suggested_time": "YYYY-MM-DD HH:MM:SS format",
+        "type": "reminder" or "event",
+        "needs_confirmation": true/false,
+        "confirmation_message": "Message to ask for confirmation if needed"
+    }}
 }}
 
 If it's a fact to remember:
 {{
     "action": "remember_fact",
-    "content": "The fact to remember",
-    "category": "personal", "preference", "habit", etc.
+    "message": "I'll remember that [fact]",
+    "data": {{
+        "content": "The fact to remember",
+        "category": "personal", "preference", "habit", etc.
+    }}
 }}
 
 If it's clearing reminders:
 {{
     "action": "clear_reminders",
+    "message": "I'll clear all your active reminders",
     "needs_confirmation": true,
     "confirmation_message": "I found X active reminders. Would you like me to clear them all?"
 }}
@@ -394,23 +467,33 @@ If it's clearing reminders:
 If it's reading back reminders:
 {{
     "action": "read_back_reminders",
-    "summary": "A natural summary of all active reminders"
+    "message": "Here are your active reminders: [list of reminders]"
 }}
 
 If it's a question about past events or facts:
 {{
     "action": "query_memory",
-    "query": "The specific question",
-    "response": "Your answer based on available context"
+    "message": "Based on my records, [answer]",
+    "data": {{
+        "response": "Your answer based on available context"
+    }}
 }}
 
 If it's a general query:
 {{
     "action": "general_query",
-    "response": "Your brief, relevant response"
+    "message": "Your brief, relevant response",
+    "data": {{
+        "response": "Your detailed response"
+    }}
 }}
 
-Return only the JSON object, nothing else."""
+Important:
+1. For reminders, always include both the top-level "message" and the "message" field in the "data" object
+2. The top-level "message" should be a natural confirmation of what you're doing
+3. The "data.message" should contain the actual reminder text
+4. Always include all required fields in the correct structure
+5. Return only the JSON object, nothing else."""
     
     try:
         completion = together_client.chat.completions.create(
@@ -599,7 +682,7 @@ def clear_all_memory():
         return "I encountered an error while clearing your memories."
 
 def handle_action(action_data, original_text):
-    global pending_action
+    global pending_action, is_listening
     try:
         # Store conversation for context
         memory["long_term"]["conversations"].append({
@@ -623,7 +706,6 @@ def handle_action(action_data, original_text):
         if pending_action and "yes" in original_text.lower():
             if pending_action["action"] == "clear_reminders":
                 response = clear_reminders()
-                response = response.replace("I've cleared", "I've cleared")
                 print(f"Response: {response}")
                 speak(response)
                 show_notification(
@@ -633,7 +715,6 @@ def handle_action(action_data, original_text):
                 )
             elif pending_action["action"] == "clear_all_memory":
                 response = clear_all_memory()
-                response = response.replace("I've cleared", "I've cleared")
                 print(f"Response: {response}")
                 speak(response)
                 show_notification(
@@ -641,7 +722,37 @@ def handle_action(action_data, original_text):
                     message=response,
                     timeout=5
                 )
+            elif pending_action["action"] == "set_reminder":
+                # Handle the pending reminder
+                reminder_data = pending_action["data"]
+                if reminder_data["type"] == "event":
+                    memory["long_term"]["events"].append({
+                        "description": reminder_data["message"],
+                        "datetime": reminder_data["suggested_time"],
+                        "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    })
+                    response = f"I've added the event: {reminder_data['message']} for {format_datetime(reminder_data['suggested_time'])}"
+                else:
+                    memory["long_term"]["reminders"].append({
+                        "message": reminder_data["message"],
+                        "datetime": reminder_data["suggested_time"],
+                        "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": "active"
+                    })
+                    response = f"I've set a reminder for {reminder_data['message']} at {format_datetime(reminder_data['suggested_time'])}"
+                
+                print(f"Response: {response}")
+                speak(response)
+                save_memory()
+                show_notification(
+                    title="Memory Updated",
+                    message=f"Added {reminder_data['type']}: {reminder_data['message'][:50]}...",
+                    timeout=5
+                )
+            
             pending_action = None
+            # Start listening after confirmation
+            is_listening = True
             return
             
         # Handle new actions
@@ -665,19 +776,26 @@ def handle_action(action_data, original_text):
                 message=response,
                 timeout=10
             )
+            # Start listening after reading reminders
+            is_listening = True
             return
             
         elif action_data["action"] == "clear_reminders":
+            active_reminders = [r for r in memory["long_term"]["reminders"] if r.get("status") == "active"]
+            if not active_reminders:
+                response = "You don't have any active reminders to clear."
+                print(f"Response: {response}")
+                speak(response)
+                return
+                
             if action_data.get("needs_confirmation", False):
                 pending_action = action_data
-                response = action_data["confirmation_message"]
-                response = response.replace("I found", "I found")
+                response = f"I found {len(active_reminders)} active reminder{'s' if len(active_reminders) > 1 else ''}. Would you like me to clear {'them' if len(active_reminders) > 1 else 'it'}?"
                 print(f"Response: {response}")
                 speak(response)
                 return
             else:
                 response = clear_reminders()
-                response = response.replace("I've cleared", "I've cleared")
                 print(f"Response: {response}")
                 speak(response)
                 show_notification(
@@ -696,7 +814,6 @@ def handle_action(action_data, original_text):
                 return
             else:
                 response = clear_all_memory()
-                response = response.replace("I've cleared", "I've cleared")
                 print(f"Response: {response}")
                 speak(response)
                 show_notification(
@@ -707,74 +824,76 @@ def handle_action(action_data, original_text):
             return
             
         if action_data["action"] == "set_reminder":
-            if "message" not in action_data or "suggested_time" not in action_data:
+            # Extract reminder data from the nested structure
+            reminder_data = action_data.get("data", {})
+            if not reminder_data or "message" not in reminder_data or "suggested_time" not in reminder_data:
                 print(f"Invalid reminder data: {action_data}")
                 return
                 
             # Ask for confirmation if the time is ambiguous
-            reminder_time = datetime.datetime.strptime(action_data["suggested_time"], "%Y-%m-%d %H:%M:%S")
+            reminder_time = datetime.datetime.strptime(reminder_data["suggested_time"], "%Y-%m-%d %H:%M:%S")
             if reminder_time < datetime.datetime.now():
                 response = f"I notice this time has already passed. Would you like me to set this for tomorrow instead?"
                 print(f"Response: {response}")
                 speak(response)
                 pending_action = {
                     "action": "set_reminder",
-                    "data": action_data,
+                    "data": reminder_data,
                     "confirmation_message": response
                 }
                 return
                 
-            if action_data.get("needs_confirmation", False):
+            if reminder_data.get("needs_confirmation", False):
                 pending_action = {
                     "action": "set_reminder",
-                    "data": action_data,
-                    "confirmation_message": action_data["confirmation_message"]
+                    "data": reminder_data,
+                    "confirmation_message": reminder_data.get("confirmation_message", "Would you like me to set this reminder?")
                 }
-                response = action_data["confirmation_message"]
+                response = pending_action["confirmation_message"]
                 print(f"Response: {response}")
                 speak(response)
                 return
                 
-            if action_data["type"] == "event":
+            if reminder_data["type"] == "event":
                 # Check for duplicate events
                 for event in memory["long_term"]["events"]:
-                    if (event["description"].lower() == action_data["message"].lower() and 
-                        event["datetime"] == action_data["suggested_time"]):
+                    if (event["description"].lower() == reminder_data["message"].lower() and 
+                        event["datetime"] == reminder_data["suggested_time"]):
                         response = f"I notice you already have this event scheduled. Would you like me to update it instead?"
                         print(f"Response: {response}")
                         speak(response)
                         return
                 
                 memory["long_term"]["events"].append({
-                    "description": action_data["message"],
-                    "datetime": action_data["suggested_time"],
+                    "description": reminder_data["message"],
+                    "datetime": reminder_data["suggested_time"],
                     "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 })
-                response = f"I've added the event: {action_data['message']} for {format_datetime(action_data['suggested_time'])}"
+                response = f"I've added the event: {reminder_data['message']} for {format_datetime(reminder_data['suggested_time'])}"
             else:
                 # Check for duplicate reminders
                 for reminder in memory["long_term"]["reminders"]:
-                    if (reminder["message"].lower() == action_data["message"].lower() and 
-                        reminder["datetime"] == action_data["suggested_time"]):
+                    if (reminder["message"].lower() == reminder_data["message"].lower() and 
+                        reminder["datetime"] == reminder_data["suggested_time"]):
                         response = f"I notice you already have this reminder set. Would you like me to update it instead?"
                         print(f"Response: {response}")
                         speak(response)
                         return
                 
                 memory["long_term"]["reminders"].append({
-                    "message": action_data["message"],
-                    "datetime": action_data["suggested_time"],
+                    "message": reminder_data["message"],
+                    "datetime": reminder_data["suggested_time"],
                     "created_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                     "status": "active"
                 })
-                response = f"I've set a reminder for {action_data['message']} at {format_datetime(action_data['suggested_time'])}"
+                response = f"I've set a reminder for {reminder_data['message']} at {format_datetime(reminder_data['suggested_time'])}"
             
             print(f"Response: {response}")
             speak(response)
             save_memory()
             show_notification(
                 title="Memory Updated",
-                message=f"Added {action_data['type']}: {action_data['message'][:50]}...",
+                message=f"Added {reminder_data['type']}: {reminder_data['message'][:50]}...",
                 timeout=5
             )
         
@@ -841,37 +960,52 @@ def handle_action(action_data, original_text):
         # Update intent display after each action
         update_intent_display()
         
+        # Start listening after handling any action
+        is_listening = True
+        
     except Exception as e:
         print(f"Error handling action: {e}")
+        # Start listening even if there's an error
+        is_listening = True
 
 def check_reminders():
+    """Check for upcoming reminders and notify the user"""
     while True:
         try:
             now = datetime.datetime.now()
-            current_time = now.strftime("%Y-%m-%d %H:%M:%S")
             
+            # Check for upcoming reminders
+            upcoming_reminders = []
             for reminder in memory["long_term"]["reminders"][:]:
                 if reminder.get("status") != "active":
                     continue
                     
                 reminder_time = datetime.datetime.strptime(reminder["datetime"], "%Y-%m-%d %H:%M:%S")
-                if now >= reminder_time:
+                
+                # If reminder time has passed, mark it as completed
+                if reminder_time < now:
                     reminder["status"] = "completed"
-                    reminder["completed_at"] = current_time
-                    speak(f"Sir, this is a reminder: {reminder['message']}")
+                    reminder["completed_at"] = now.strftime("%Y-%m-%d %H:%M:%S")
+                    continue
+                
+                # Check if reminder is within next 5 minutes
+                if 0 < (reminder_time - now).total_seconds() <= 300:  # 5 minutes
+                    upcoming_reminders.append(reminder)
+            
+            # Notify about upcoming reminders
+            if upcoming_reminders:
+                for reminder in upcoming_reminders:
+                    message = f"Reminder: {reminder['message']}"
+                    print(f"\n{message}")
+                    speak(message)
                     show_notification(
-                        title="Reminder",
-                        message=reminder["message"],
+                        title="Upcoming Reminder",
+                        message=message,
                         timeout=10
                     )
-                    save_memory()
-                    update_intent_display()
-            
-            # Check if we should initiate a turn
-            if should_initiate_turn():
-                initiate_turn()
             
             time.sleep(30)
+            
         except Exception as e:
             print(f"Error checking reminders: {e}")
             time.sleep(30)
@@ -896,7 +1030,7 @@ def display_weekly_calendar():
                     "type": "event"
                 })
         
-        # Add reminders
+        # Add active reminders
         for reminder in memory["long_term"]["reminders"]:
             if reminder.get("status") == "active":
                 reminder_time = datetime.datetime.strptime(reminder["datetime"], "%Y-%m-%d %H:%M:%S")
@@ -922,6 +1056,20 @@ def display_weekly_calendar():
             for item in weekly_items:
                 time_str = item["time"].strftime("%a %B %d at %I:%M %p")
                 print(f"• {time_str}: {item['text']}")
+        
+        # Display completed reminders from the past week
+        completed_reminders = [
+            r for r in memory["long_term"]["reminders"]
+            if r.get("status") == "completed" and
+            start_of_week <= datetime.datetime.strptime(r["completed_at"], "%Y-%m-%d %H:%M:%S") <= end_of_week
+        ]
+        
+        if completed_reminders:
+            print("\nCompleted reminders from this week:")
+            for reminder in completed_reminders:
+                completed_time = datetime.datetime.strptime(reminder["completed_at"], "%Y-%m-%d %H:%M:%S")
+                time_str = completed_time.strftime("%a %B %d at %I:%M %p")
+                print(f"• {time_str}: {reminder['message']}")
         
         print("\n=== End Calendar ===\n")
         
