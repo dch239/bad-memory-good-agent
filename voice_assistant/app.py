@@ -898,31 +898,33 @@ def handle_action(action_data, original_text):
             )
         
         elif action_data["action"] == "remember_fact":
-            if "content" not in action_data or "category" not in action_data:
+            # Extract fact data from the nested structure
+            fact_data = action_data.get("data", {})
+            if not fact_data or "content" not in fact_data or "category" not in fact_data:
                 print(f"Invalid fact data: {action_data}")
                 return
                 
             # Check for similar facts
-            content = action_data["content"].lower().strip()
+            content = fact_data["content"].lower().strip()
             for fact in memory["long_term"]["facts"]:
                 if fact["content"].lower().strip() == content:
-                    response = f"I already know that {action_data['content']}. Would you like me to update it with any new information?"
+                    response = f"I already know that {fact_data['content']}. Would you like me to update it with any new information?"
                     print(f"Response: {response}")
                     speak(response)
                     return
             
             memory["long_term"]["facts"].append({
-                "content": action_data["content"],
-                "category": action_data["category"],
+                "content": fact_data["content"],
+                "category": fact_data["category"],
                 "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
-            response = f"I've noted that {action_data['content']}"
+            response = f"I've noted that {fact_data['content']}"
             print(f"Response: {response}")
             speak(response)
             save_memory()
             show_notification(
                 title="Memory Updated",
-                message=f"Remembered: {action_data['content'][:50]}...",
+                message=f"Remembered: {fact_data['content'][:50]}...",
                 timeout=5
             )
         

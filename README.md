@@ -1,6 +1,6 @@
 # Personal Voice Assistant
 
-A sophisticated voice-enabled personal assistant that helps you manage your daily life with natural conversation and memory capabilities.
+A voice-enabled personal assistant that helps manage daily tasks through natural conversation and memory capabilities.
 
 ## Features
 
@@ -44,6 +44,8 @@ A sophisticated voice-enabled personal assistant that helps you manage your dail
    ```
    TOGETHER_API_KEY=your_together_ai_api_key
    ```
+   
+   > **Note**: Get your API key from [Together.ai](https://api.together.xyz/). Their generous free tier includes $1 credit that lasts forever - perfect for personal projects!
 
 4. Run the assistant:
    ```bash
