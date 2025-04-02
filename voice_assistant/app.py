@@ -929,30 +929,34 @@ def handle_action(action_data, original_text):
             )
         
         elif action_data["action"] == "query_memory":
-            if "response" not in action_data:
+            # Extract response from the nested structure
+            response_data = action_data.get("data", {})
+            if not response_data or "response" not in response_data:
                 print(f"Invalid query response: {action_data}")
                 return
                 
-            response = f"Based on my records, {action_data['response']}"
+            response = f"Based on my records, {response_data['response']}"
             print(f"Response: {response}")
             speak(response)
             show_notification(
                 title="Memory Query",
-                message=action_data["response"],
+                message=response_data["response"],
                 timeout=10
             )
         
         elif action_data["action"] == "general_query":
-            if "response" not in action_data:
+            # Extract response from the nested structure
+            response_data = action_data.get("data", {})
+            if not response_data or "response" not in response_data:
                 print(f"Invalid general query response: {action_data}")
                 return
                 
-            response = action_data["response"]
+            response = response_data["response"]
             print(f"Response: {response}")
             speak(response)
             show_notification(
                 title="Assistant Response",
-                message=action_data["response"],
+                message=response_data["response"],
                 timeout=10
             )
         
