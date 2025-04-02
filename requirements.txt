@@ -1,0 +1,7 @@
+requests==2.31.0
+together==1.4.6
+pynput==1.7.6
+pyaudio==0.2.13
+SpeechRecognition==3.10.0
+python-dotenv==1.0.0
+python-dateutil==2.8.2 

@@ -1,0 +1,32 @@
+[project]
+name = "voice_assistant"
+version = "0.1.0"
+description = "Voice assistant that listens via microphone and acts on commands using LLM"
+authors = [
+    {name = "User", email = "user@example.com"},
+]
+requires-python = ">=3.7"
+readme = "README.md"
+dependencies = [
+    "openai>=1.12.0",
+    "pynput>=1.7.6",
+    "pyaudio>=0.2.13",
+    "SpeechRecognition>=3.10.0",
+    "plyer>=2.1.0",
+    "python-dotenv>=1.0.0",
+    "gTTS>=2.5.1",
+    "pygame>=2.5.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["voice_assistant"]
+
+[project.scripts]
+voice-assistant = "voice_assistant:main" 
